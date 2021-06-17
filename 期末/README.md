@@ -1,4 +1,7 @@
-## C 語言版組譯器的用法
+# Assembler -- JavaScript
+
+
+# C 語言版組譯器的用法
 
 ```
 $ cd c
@@ -68,7 +71,6 @@ $ c/asm.o Add
   @0                   0000000000000000
   M=D                  1110001100001000
 ```
-# Assembler -- JavaScript
 
 ## JavaScript 版組譯器的用法
 
