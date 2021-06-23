@@ -3,14 +3,15 @@
 ## 工具
 
 * [gdb](gdb.md)
+
 **參考資料
     * https://linuxtools-rst.readthedocs.io/zh_CN/latest/tool/gdb.html
 
 ## Frame 
 **參考資料
 
-* https://eli.thegreenplace.net/2011/02/04/where-the-top-of-the-stack-is-on-x86 (x86 讚!)
-* https://eli.thegreenplace.net/2011/09/06/stack-frame-layout-on-x86-64/ (x64 讚!)
+* https://eli.thegreenplace.net/2011/02/04/where-the-top-of-the-stack-is-on-x86 
+* https://eli.thegreenplace.net/2011/09/06/stack-frame-layout-on-x86-64/
 * [C的function call與stack frame心得](http://lazyflai.blogspot.com/2008/07/cfunction-callstack-frame.html)
 * https://www.quora.com/What-is-the-difference-between-a-stack-pointer-and-a-frame-pointer
 * https://en.wikipedia.org/wiki/Call_stack
