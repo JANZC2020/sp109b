@@ -1,42 +1,31 @@
-// c4.c - C in four functions
-
-// char, int, and pointer types
-// if, while, return, and expression statements
-// just enough features to allow self-compilation and a bit more
-
-// Written by Robert Swierczek
-// + x86 JIT compiler by Dmytro Sirenko
-
 #include <stdio.h>
 #include <stdlib.h>
 #include <memory.h>
 #ifndef _WIN32
 #include <sys/mman.h>
 #include <dlfcn.h>
-#else
-#include "mman32.h"
-#include "dlfcn32.h"
-#define CHAR TYCHAR
-#define INT TYINT
-#endif
 
-char *p, *lp, // current position in source code
-     *jitmem, // executable memory for JIT-compiled native code
-     *data,   // data/bss pointer
-     **linemap; // maps a line number into its source position
+//此處引入標頭檔 C4會自動忽略並轉為類似printf等類函式庫
 
-int *e, *le, *text, // current position in emitted code
-    *id,      // currently parsed indentifier
-    *sym,     // symbol table (simple list of identifiers)
-    tk,       // current token
-    ival,     // current token value
-    ty,       // current expression type
-    loc,      // local variable offset
-    line,     // current line number
-    *srcmap,  // maps a bytecode into its corresponding source line number
-    src;      // print source, c4 assembly and JIT addresses
 
-enum Token {
+char *p, *lp, // 當前源代碼位置 (*:指標 p: 目前原始碼指標, lp: 上一行原始碼指標)
+     *jitmem, // IT 編譯的本地代碼的可執行內存
+     *data,   // 資料段機器碼指標
+     **linemap; // 將行號映射到其源位置
+
+int *e, *le, *text, // 發出代碼目前位置 (e: 目前機器碼指標, le: 上一行機器碼指標)
+    *id,      // 目前解析出來的標識名稱(符) (id: 目前的 id)
+    *sym,     // 簡單的標識列表 (符號表)
+    tk,       // 當前標記(目前 token)
+    ival,     // 當前標記值 (目前的 token 值)
+    ty,       // 當前表示式型態 (目前的運算式型態)
+    loc,      // 區域變數位移 (區域變數的位移)
+    line,     // 目前行號 (目前行號)
+    *srcmap,  // 將字節碼映射到對應的源行號
+    src;      // 印出原始碼和程序標誌 (印出原始碼)
+
+// tokens and classes (運算符最後並按優先順序排列) (按優先權順序排列)
+enum Token {// token(標記) : 0-127 直接用該字母表達， 128 以後用代號。
   Num = 128, Fun, Sys, Glo, Loc, Id,
   Char, Else, Enum, If, Int, Return, Sizeof, While,
   Assign, Cond, Lor, Lan, Or, Xor, And, Eq, Ne, Lt, Gt, Le, Ge, Shl, Shr, Add, Sub, Mul, Div, Mod, Inc, Dec, Brak
@@ -53,52 +42,52 @@ enum Ty { CHAR, INT, PTR };
 // identifier offsets (since we can't create an ident struct)
 enum Identifier { Tk, Hash, Name, Class, Type, Val, HClass, HType, HVal, Idsz };
 
-void next()
+void next() // 詞彙解析 lexer
 {
-  char *pp;
+  char *pp; // 用循環來忽略空白字符,不過不能被詞法分析器識別的字符都被認為是空白字符
 
   while (tk = *p) {
     ++p;
-    if (tk == '\n') {
+    if (tk == '\n') { // 換行
       if (src) {
         linemap[line] = lp;
-        while (le < e) { srcmap[le - text] = line; le++; };
+        while (le < e) { srcmap[le - text] = line; le++; }; //  當上一行機器碼指標小於目前機器碼指標時 印出上一行的所有目的碼
       }
-      lp = p;
+      lp = p; // lp = p = 新一行的原始碼開頭
       ++line;
     }
-    else if (tk == '#') {
-      while (*p != 0 && *p != '\n') ++p;
+    else if (tk == '#') { // 取得 #include <stdio.h> 引入標頭檔這類的一整行
+      while (*p != 0 && *p != '\n') ++p; //當目前原始碼指標不等於零and不為空值
     }
-    else if ((tk >= 'a' && tk <= 'z') || (tk >= 'A' && tk <= 'Z') || tk == '_') {
-      pp = p - 1;
-      while ((*p >= 'a' && *p <= 'z') || (*p >= 'A' && *p <= 'Z') || (*p >= '0' && *p <= '9') || *p == '_')
-        tk = tk * 147 + *p++;
-      tk = (tk << 6) + (p - pp);
-      id = sym;
-      while (id[Tk]) {
-        if (tk == id[Hash] && !memcmp((char *)id[Name], pp, p - pp)) { tk = id[Tk]; return; }
-        id = id + Idsz;
+    else if ((tk >= 'a' && tk <= 'z') || (tk >= 'A' && tk <= 'Z') || tk == '_') { // 取得變數名稱
+      pp = p - 1; //因为有++p,pp回退一个字符,pp指向 [这个符號] 的首字母
+      while ((*p >= 'a' && *p <= 'z') || (*p >= 'A' && *p <= 'Z') || (*p >= '0' && *p <= '9') || *p == '_') //目前原始碼指標(大於等於a and 小於等於z)or(大於等於A and 小於等於Z)or(大於等於0 and 小於等於9)or為空值
+        tk = tk * 147 + *p++; // 計算雜湊值
+      tk = (tk << 6) + (p - pp); // 符號表的雜湊位址
+      id = sym; //  目前解析出來的名稱=列表
+      while (id[Tk]) { // 檢查是否碰撞
+        if (tk == id[Hash] && !memcmp((char *)id[Name], pp, p - pp)) { tk = id[Tk]; return; } // 沒碰撞就傳回
+        id = id + Idsz; // 碰撞，前進到下一格。
       }
-      id[Name] = (int)pp;
-      id[Hash] = tk;
-      tk = id[Tk] = Id;
+      id[Name] = (int)pp; // id.Name = ptr(變數名稱)
+      id[Hash] = tk; // id.Hash = 雜湊值
+      tk = id[Tk] = Id; // token = id.Tk = Id  token 類型為 identifier
       return;
     }
-    else if (tk >= '0' && tk <= '9') {
-      if (ival = tk - '0') { while (*p >= '0' && *p <= '9') ival = ival * 10 + *p++ - '0'; }
-      else if (*p == 'x' || *p == 'X') {
-        while ((tk = *++p) && ((tk >= '0' && tk <= '9') || (tk >= 'a' && tk <= 'f') || (tk >= 'A' && tk <= 'F')))
+    else if (tk >= '0' && tk <= '9') { // 取得數字串
+      if (ival = tk - '0') { while (*p >= '0' && *p <= '9') ival = ival * 10 + *p++ - '0'; } // 十進位
+      else if (*p == 'x' || *p == 'X') { // 十六進位  「x」則代表十六進位（就如「O」代表八進位)
+        while ((tk = *++p) && ((tk >= '0' && tk <= '9') || (tk >= 'a' && tk <= 'f') || (tk >= 'A' && tk <= 'F'))) // 16 進位
           ival = ival * 16 + (tk & 15) + (tk >= 'A' ? 9 : 0);
       }
-      else { while (*p >= '0' && *p <= '7') ival = ival * 8 + *p++ - '0'; }
+      else { while (*p >= '0' && *p <= '7') ival = ival * 8 + *p++ - '0'; } // 八進位
       tk = Num;
       return;
     }
     else if (tk == '/') {
-      if (*p == '/') {
+      if (*p == '/') {  // 註解
         ++p;
-        while (*p != 0 && *p != '\n') ++p;
+        while (*p != 0 && *p != '\n') ++p; // 略過註解
       }
       else {
         tk = Div;
@@ -111,20 +100,21 @@ void next()
         if ((ival = *p++) == '\\') {
           if ((ival = *p++) == 'n') ival = '\n';
         }
-        if (tk == '"') *data++ = ival;
+        if (tk == '"') *data++ = ival; // 把字串塞到資料段裏(如果是"則視為字符串，向資料段輸入字符)
       }
       ++p;
-      if (tk == '"') ival = (int)pp; else tk = Num;
+      if (tk == '"') ival = (int)pp; else tk = Num; // (若是字串) ? (ival = 字串 (在資料段中的) 指標) : (字元值) 
+      //雙引號(")則ival指向data中字符串开始,單引號則視為数字
       return;
-    }
-    else if (tk == '=') { if (*p == '=') { ++p; tk = Eq; } else tk = Assign; return; }
-    else if (tk == '+') { if (*p == '+') { ++p; tk = Inc; } else tk = Add; return; }
-    else if (tk == '-') { if (*p == '-') { ++p; tk = Dec; } else tk = Sub; return; }
-    else if (tk == '!') { if (*p == '=') { ++p; tk = Ne; } return; }
-    else if (tk == '<') { if (*p == '=') { ++p; tk = Le; } else if (*p == '<') { ++p; tk = Shl; } else tk = Lt; return; }
-    else if (tk == '>') { if (*p == '=') { ++p; tk = Ge; } else if (*p == '>') { ++p; tk = Shr; } else tk = Gt; return; }
-    else if (tk == '|') { if (*p == '|') { ++p; tk = Lor; } else tk = Or; return; }
-    else if (tk == '&') { if (*p == '&') { ++p; tk = Lan; } else tk = And; return; }
+    } // 以下為運算元 =+-!<>|&^%*[?~, ++, --, !=, <=, >=, ||, &&, ~  ;{}()],:
+    else if (tk == '=') { if (*p == '=') { ++p; tk = Eq; } else tk = Assign; return; } //等於,賦值
+    else if (tk == '+') { if (*p == '+') { ++p; tk = Inc; } else tk = Add; return; } //加
+    else if (tk == '-') { if (*p == '-') { ++p; tk = Dec; } else tk = Sub; return; } //減
+    else if (tk == '!') { if (*p == '=') { ++p; tk = Ne; } return; } //不等於
+    else if (tk == '<') { if (*p == '=') { ++p; tk = Le; } else if (*p == '<') { ++p; tk = Shl; } else tk = Lt; return; } //< ， <= ，<<
+    else if (tk == '>') { if (*p == '=') { ++p; tk = Ge; } else if (*p == '>') { ++p; tk = Shr; } else tk = Gt; return; } //> ， >= ，>>
+    else if (tk == '|') { if (*p == '|') { ++p; tk = Lor; } else tk = Or; return; } //或 
+    else if (tk == '&') { if (*p == '&') { ++p; tk = Lan; } else tk = And; return; } //和
     else if (tk == '^') { tk = Xor; return; }
     else if (tk == '%') { tk = Mod; return; }
     else if (tk == '*') { tk = Mul; return; }
@@ -134,30 +124,30 @@ void next()
   }
 }
 
-void expr(int lev)
+void expr(int lev) // 表示式分析(運算式) expression, 其中 lev 代表優先等級
 {
   int t, *d;
 
-  if (!tk) { printf("%d: unexpected eof in expression\n", line); exit(-1); }
-  else if (tk == Num) { *++e = IMM; *++e = ival; next(); ty = INT; }
-  else if (tk == '"') {
+  if (!tk) { printf("%d: unexpected eof in expression\n", line); exit(-1); } // EOF
+  else if (tk == Num) { *++e = IMM; *++e = ival; next(); ty = INT; } // 取數為表達示數值
+  else if (tk == '"') { // 字串
     *++e = IMM; *++e = ival; next();
     while (tk == '"') next();
-    data = (char *)((int)data + sizeof(int) & -sizeof(int)); ty = PTR;
+    data = (char *)((int)data + sizeof(int) & -sizeof(int)); ty = PTR; // 用 int 為大小對齊
   }
-  else if (tk == Sizeof) {
+  else if (tk == Sizeof) { // 處理 sizeof(type) ，其中 type 可能為 char, int 或 ptr
     next(); if (tk == '(') next(); else { printf("%d: open paren expected in sizeof\n", line); exit(-1); }
     ty = INT; if (tk == Int) next(); else if (tk == Char) { next(); ty = CHAR; }
-    while (tk == Mul) { next(); ty = ty + PTR; }
+    while (tk == Mul) { next(); ty = ty + PTR; } //多级指標,每多一级加PTR
     if (tk == ')') next(); else { printf("%d: close paren expected in sizeof\n", line); exit(-1); }
-    *++e = IMM; *++e = (ty == CHAR) ? sizeof(char) : sizeof(int);
+    *++e = IMM; *++e = (ty == CHAR) ? sizeof(char) : sizeof(int); //除了char是一字節,int和多级指標都是int大小
     ty = INT;
   }
-  else if (tk == Id) {
+  else if (tk == Id) { // 處理 id
     d = id; next();
     if (tk == '(') {
       next();
-      t = 0;
+      t = 0; //形式参數
       while (tk != ')') { expr(Assign); *++e = PSH; ++t; if (tk == ',') next(); }
       next();
       if (d[Class] == Sys) *++e = d[Val];
@@ -234,10 +224,10 @@ void expr(int lev)
       expr(Cond);
       *d = (int)(e + 1);
     }
-    else if (tk == Lor) { next(); *++e = BNZ; d = ++e; expr(Lan); *d = (int)(e + 1); ty = INT; }
-    else if (tk == Lan) { next(); *++e = BZ;  d = ++e; expr(Or);  *d = (int)(e + 1); ty = INT; }
-    else if (tk == Or)  { next(); *++e = PSH; expr(Xor); *++e = OR;  ty = INT; }
-    else if (tk == Xor) { next(); *++e = PSH; expr(And); *++e = XOR; ty = INT; }
+    else if (tk == Lor) { next(); *++e = BNZ; d = ++e; expr(Lan); *d = (int)(e + 1); ty = INT; } //短路,邏輯Or運算符左左邊true則表示式為true,不用計算運算符右側的值
+    else if (tk == Lan) { next(); *++e = BZ;  d = ++e; expr(Or);  *d = (int)(e + 1); ty = INT; } //短路,邏輯And
+    else if (tk == Or)  { next(); *++e = PSH; expr(Xor); *++e = OR;  ty = INT; } //將當前值Push,計算運算符右边值,再與當前值(在棧中)做運算
+    else if (tk == Xor) { next(); *++e = PSH; expr(And); *++e = XOR; ty = INT; } //expr中lev指明遞迴函数中最结合性不得低於哪一个運算符
     else if (tk == And) { next(); *++e = PSH; expr(Eq);  *++e = AND; ty = INT; }
     else if (tk == Eq)  { next(); *++e = PSH; expr(Lt);  *++e = EQ;  ty = INT; }
     else if (tk == Ne)  { next(); *++e = PSH; expr(Lt);  *++e = NE;  ty = INT; }
@@ -249,7 +239,7 @@ void expr(int lev)
     else if (tk == Shr) { next(); *++e = PSH; expr(Add); *++e = SHR; ty = INT; }
     else if (tk == Add) {
       next(); *++e = PSH; expr(Mul);
-      if ((ty = t) > PTR) { *++e = PSH; *++e = IMM; *++e = sizeof(int); *++e = MUL;  }
+      if ((ty = t) > PTR) { *++e = PSH; *++e = IMM; *++e = sizeof(int); *++e = MUL;  } //處理指標
       *++e = ADD;
     }
     else if (tk == Sub) {
