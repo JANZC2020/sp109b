@@ -3,6 +3,7 @@
 ## 工具
 
 * [gdb](gdb.md)
+
 **參考資料
     * https://linuxtools-rst.readthedocs.io/zh_CN/latest/tool/gdb.html
 
