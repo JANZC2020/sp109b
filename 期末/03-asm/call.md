@@ -1,5 +1,5 @@
 # 函數呼叫的方式
-
+**參考
 * https://github.com/cccbook/sp/wiki/assemblyCall
 
 
@@ -13,6 +13,7 @@
 6. 執行 ret 返回。
 
 ## x86 實作
+**參考
 
 * https://eli.thegreenplace.net/2011/02/04/where-the-top-of-the-stack-is-on-x86 
 * https://eli.thegreenplace.net/2011/09/06/stack-frame-layout-on-x86-64/ 
