@@ -1,19 +1,14 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <memory.h>
-#include <sys/mman.h>
-#include <dlfcn.h>
-
+#include <unistd.h>
+#include <fcntl.h>
 //此處引入標頭檔 C4會自動忽略並轉為類似printf等類函式庫
 
-
-
 char *p, *lp, // 當前源代碼位置 (*:指標 p: 目前原始碼指標, lp: 上一行原始碼指標)
-     *jitmem, // IT 編譯的本地代碼的可執行內存
-     *data,   // 資料段機器碼指標
-     **linemap; // 將行號映射到其源位置
+     *data;   // 資料段機器碼指標
 
-int *e, *le, *text, // 發出代碼目前位置 (e: 目前機器碼指標, le: 上一行機器碼指標)
+int *e, *le,  // 發出代碼目前位置 (e: 目前機器碼指標, le: 上一行機器碼指標)
     *id,      // 目前解析出來的標識名稱(符) (id: 目前的 id)
     *sym,     // 簡單的標識列表 (符號表)
     tk,       // 當前標記(目前 token)
@@ -21,9 +16,8 @@ int *e, *le, *text, // 發出代碼目前位置 (e: 目前機器碼指標, le: �
     ty,       // 當前表示式型態 (目前的運算式型態)
     loc,      // 區域變數位移 (區域變數的位移)
     line,     // 目前行號 (目前行號)
-    *srcmap,   // 將字節碼映射到對應的源行號
-    src;      // 印出原始碼和程序標誌 (印出原始碼)
-
+    src,      // 印出原始碼和程序標誌 (印出原始碼)
+    debug;    // 印出執行指令 (印出執行指令 -- 除錯模式)
 
 // tokens and classes (運算符最後並按優先順序排列) (按優先權順序排列)
 enum Token {// token(標記) : 0-127 直接用該字母表達， 128 以後用代號。
